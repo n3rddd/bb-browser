@@ -40,6 +40,8 @@ import { networkCommand } from "./commands/network.js";
 import { consoleCommand } from "./commands/console.js";
 import { errorsCommand } from "./commands/errors.js";
 import { traceCommand } from "./commands/trace.js";
+import { fetchCommand } from "./commands/fetch.js";
+import { recipeCommand } from "./commands/recipe.js";
 
 const VERSION = "0.3.0";
 
@@ -97,6 +99,12 @@ bb-browser - AI Agent 浏览器自动化工具
   trace start       开始录制用户操作
   trace stop        停止录制，输出事件列表
   trace status      查看录制状态
+  fetch <url>       在浏览器上下文中 fetch（自动同源路由，带登录态）
+  recipe            管理和运行社区/私有 fetch 食谱
+  recipe list       列出所有可用 recipe
+  recipe search <q> 搜索 recipe
+  recipe run <name> 运行 recipe
+  recipe update     更新社区 recipe 库
 
 选项：
   --json          以 JSON 格式输出
@@ -547,6 +555,39 @@ async function main(): Promise<void> {
           process.exit(1);
         }
         await traceCommand(subCmd, { json: parsed.flags.json, tabId: globalTabId });
+        break;
+      }
+
+      case "fetch": {
+        const fetchUrl = parsed.args[0];
+        if (!fetchUrl) {
+          console.error("[error] fetch: <url> is required.");
+          console.error("  Usage: bb-browser fetch <url> [--json] [--method POST] [--body '{...}']");
+          console.error("  Example: bb-browser fetch https://www.reddit.com/api/me.json --json");
+          process.exit(1);
+        }
+        // 解析 fetch 特有选项
+        const methodIdx = process.argv.findIndex(a => a === "--method");
+        const fetchMethod = methodIdx >= 0 ? process.argv[methodIdx + 1] : undefined;
+        const fetchBodyIdx = process.argv.findIndex(a => a === "--body");
+        const fetchBody = fetchBodyIdx >= 0 ? process.argv[fetchBodyIdx + 1] : undefined;
+        const headersIdx = process.argv.findIndex(a => a === "--headers");
+        const fetchHeaders = headersIdx >= 0 ? process.argv[headersIdx + 1] : undefined;
+        const outputIdx = process.argv.findIndex(a => a === "--output");
+        const fetchOutput = outputIdx >= 0 ? process.argv[outputIdx + 1] : undefined;
+        await fetchCommand(fetchUrl, {
+          json: parsed.flags.json,
+          method: fetchMethod,
+          body: fetchBody,
+          headers: fetchHeaders,
+          output: fetchOutput,
+          tabId: globalTabId,
+        });
+        break;
+      }
+
+      case "recipe": {
+        await recipeCommand(parsed.args, { json: parsed.flags.json });
         break;
       }
 
