@@ -14,7 +14,7 @@
  */
 
 import { generateId, type Request, type Response, type TabInfo } from "@bb-browser/shared";
-import { sendCommand } from "../client.js";
+import { handleJqResponse, sendCommand } from "../client.js";
 import { ensureDaemonRunning } from "../daemon-manager.js";
 import { readFileSync, readdirSync, existsSync, mkdirSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -29,6 +29,8 @@ const COMMUNITY_REPO = "https://github.com/epiral/bb-sites.git";
 export interface SiteOptions {
   json?: boolean;
   tabId?: number;
+  days?: number;
+  jq?: string;
 }
 
 /** Adapter 参数定义 */
@@ -48,6 +50,22 @@ interface SiteMeta {
   example?: string;
   filePath: string;
   source: "local" | "community";
+}
+
+interface HistoryDomain {
+  domain: string;
+  visits: number;
+}
+
+interface SiteRecommendation {
+  domain: string;
+  visits: number;
+  adapterCount: number;
+  adapters: Array<{
+    name: string;
+    description: string;
+    example: string;
+  }>;
 }
 
 /**
@@ -140,6 +158,23 @@ function scanSites(dir: string, source: "local" | "community"): SiteMeta[] {
 
   walk(dir);
   return sites;
+}
+
+/**
+ * 根据 URL 检查是否有对应的 site adapter，返回提示文本
+ */
+export function getSiteHintForDomain(url: string): string | null {
+  try {
+    const hostname = new URL(url).hostname;
+    const sites = getAllSites();
+    const matched = sites.filter(s => s.domain && (hostname === s.domain || hostname.endsWith("." + s.domain)));
+    if (matched.length === 0) return null;
+    const names = matched.map(s => s.name);
+    const example = matched[0].example || `bb-browser site ${names[0]}`;
+    return `该网站有 ${names.length} 个 site adapter 可直接获取数据，无需手动操作浏览器。试试: ${example}`;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -243,6 +278,8 @@ function siteUpdate(): void {
     try {
       execSync("git pull --ff-only", { cwd: COMMUNITY_SITES_DIR, stdio: "pipe" });
       console.log("更新完成。");
+      console.log("");
+      console.log("💡 运行 bb-browser site recommend 看看哪些和你的浏览习惯匹配");
     } catch (e) {
       console.error(`更新失败: ${e instanceof Error ? e.message : e}`);
       console.error("  手动修复: cd ~/.bb-browser/bb-sites && git pull");
@@ -253,6 +290,8 @@ function siteUpdate(): void {
     try {
       execSync(`git clone ${COMMUNITY_REPO} ${COMMUNITY_SITES_DIR}`, { stdio: "pipe" });
       console.log("克隆完成。");
+      console.log("");
+      console.log("💡 运行 bb-browser site recommend 看看哪些和你的浏览习惯匹配");
     } catch (e) {
       console.error(`克隆失败: ${e instanceof Error ? e.message : e}`);
       console.error(`  手动修复: git clone ${COMMUNITY_REPO} ~/.bb-browser/bb-sites`);
@@ -262,6 +301,149 @@ function siteUpdate(): void {
 
   const sites = scanSites(COMMUNITY_SITES_DIR, "community");
   console.log(`已安装 ${sites.length} 个社区 adapter。`);
+}
+
+function findSiteByName(name: string): SiteMeta | undefined {
+  return getAllSites().find((site) => site.name === name);
+}
+
+function siteInfo(name: string, options: SiteOptions): void {
+  const site = findSiteByName(name);
+
+  if (!site) {
+    console.error(`[error] site info: adapter "${name}" not found.`);
+    console.error("  Try: bb-browser site list");
+    process.exit(1);
+  }
+
+  const meta = {
+    name: site.name,
+    description: site.description,
+    domain: site.domain,
+    args: site.args,
+    example: site.example,
+    readOnly: site.readOnly,
+  };
+
+  if (options.json) {
+    console.log(JSON.stringify(meta, null, 2));
+    return;
+  }
+
+  console.log(`${site.name} — ${site.description}`);
+  console.log();
+  console.log("参数：");
+
+  const argEntries = Object.entries(site.args);
+  if (argEntries.length === 0) {
+    console.log("  （无）");
+  } else {
+    for (const [argName, argDef] of argEntries) {
+      const requiredText = argDef.required ? "必填" : "可选";
+      const description = argDef.description || "";
+      console.log(`  ${argName} (${requiredText})    ${description}`.trimEnd());
+    }
+  }
+
+  console.log();
+  console.log("示例：");
+  console.log(`  ${site.example || `bb-browser site ${site.name}`}`);
+  console.log();
+  console.log(`域名：${site.domain || "（未声明）"}`);
+  console.log(`只读：${site.readOnly ? "是" : "否"}`);
+}
+
+async function siteRecommend(options: SiteOptions): Promise<void> {
+  const days = options.days ?? 30;
+  const response = await sendCommand({
+    id: generateId(),
+    action: "history",
+    historyCommand: "domains",
+    ms: days,
+  });
+
+  if (!response.success) {
+    throw new Error(response.error || "History command failed");
+  }
+
+  const historyDomains: HistoryDomain[] = response.data?.historyDomains || [];
+  const sites = getAllSites();
+  const sitesByDomain = new Map<string, SiteMeta[]>();
+
+  for (const site of sites) {
+    if (!site.domain) continue;
+    const domain = site.domain.toLowerCase();
+    const existing = sitesByDomain.get(domain) || [];
+    existing.push(site);
+    sitesByDomain.set(domain, existing);
+  }
+
+  const available: SiteRecommendation[] = [];
+  const notAvailable: HistoryDomain[] = [];
+
+  for (const item of historyDomains) {
+    const adapters = sitesByDomain.get(item.domain.toLowerCase());
+    if (adapters && adapters.length > 0) {
+      const sortedAdapters = [...adapters].sort((a, b) => a.name.localeCompare(b.name));
+      available.push({
+        domain: item.domain,
+        visits: item.visits,
+        adapterCount: sortedAdapters.length,
+        adapters: sortedAdapters.map((site) => ({
+          name: site.name,
+          description: site.description,
+          example: site.example || `bb-browser site ${site.name}`,
+        })),
+      });
+    } else if (item.visits >= 5 && item.domain && !item.domain.includes('localhost') && item.domain.includes('.')) {
+      notAvailable.push(item);
+    }
+  }
+
+  const jsonData = {
+    days,
+    available,
+    not_available: notAvailable,
+  };
+
+  if (options.jq) {
+    handleJqResponse({ id: generateId(), success: true, data: jsonData });
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify(jsonData, null, 2));
+    return;
+  }
+
+  console.log(`基于你最近 ${days} 天的浏览记录：`);
+  console.log();
+
+  console.log("🎯 你常用这些网站，可以直接用：");
+  console.log();
+  if (available.length === 0) {
+    console.log("  （暂无匹配的 adapter）");
+  } else {
+    for (const item of available) {
+      console.log(`  ${item.domain.padEnd(20)} ${item.visits} 次访问    ${item.adapterCount} 个命令`);
+      console.log(`    试试: ${item.adapters[0]?.example || `bb-browser site ${item.adapters[0]?.name || ""}`}`);
+      console.log();
+    }
+  }
+
+  console.log("📋 你常用但还没有 adapter：");
+  console.log();
+  if (notAvailable.length === 0) {
+    console.log("  （暂无）");
+  } else {
+    for (const item of notAvailable) {
+      console.log(`  ${item.domain.padEnd(20)} ${item.visits} 次访问`);
+    }
+  }
+
+  console.log();
+  console.log('💡 跟你的 AI Agent 说 "把 notion.so CLI 化"，它就能自动完成。');
+  console.log();
+  console.log(`所有分析纯本地完成。用 --days 7 只看最近一周。`);
 }
 
 async function siteRun(
@@ -426,7 +608,15 @@ async function siteRun(
     process.exit(1);
   }
 
-  if (options.json) {
+  if (options.jq) {
+    const { applyJq } = await import("../jq.js");
+    // Tolerate ".data." prefix — Agent may copy from --json envelope structure
+    const expr = options.jq.replace(/^\.data\./, '.');
+    const results = applyJq(parsed, expr);
+    for (const r of results) {
+      console.log(typeof r === "string" ? r : JSON.stringify(r));
+    }
+  } else if (options.json) {
     console.log(JSON.stringify({ id: evalReq.id, success: true, data: parsed }));
   } else {
     console.log(JSON.stringify(parsed, null, 2));
@@ -446,6 +636,8 @@ export async function siteCommand(
 
 用法:
   bb-browser site list                      列出所有可用 adapter
+  bb-browser site info <name>               查看 adapter 元信息
+  bb-browser site recommend                 基于历史记录推荐 adapter
   bb-browser site search <query>            搜索 adapter
   bb-browser site <name> [args...]          运行 adapter（简写）
   bb-browser site run <name> [args...]      运行 adapter
@@ -478,6 +670,17 @@ export async function siteCommand(
       }
       siteSearch(args[1], options);
       break;
+    case "info":
+      if (!args[1]) {
+        console.error("[error] site info: <name> is required.");
+        console.error("  Usage: bb-browser site info <name>");
+        process.exit(1);
+      }
+      siteInfo(args[1], options);
+      break;
+    case "recommend":
+      await siteRecommend(options);
+      break;
     case "update":  siteUpdate(); break;
     case "run":
       if (!args[1]) {
@@ -493,7 +696,7 @@ export async function siteCommand(
         await siteRun(subCommand, args.slice(1), options);
       } else {
         console.error(`[error] site: unknown subcommand "${subCommand}".`);
-        console.error("  Available: list, search, run, update");
+        console.error("  Available: list, info, recommend, search, run, update");
         console.error("  Try: bb-browser site --help");
         process.exit(1);
       }

@@ -42,80 +42,64 @@ import { errorsCommand } from "./commands/errors.js";
 import { traceCommand } from "./commands/trace.js";
 import { fetchCommand } from "./commands/fetch.js";
 import { siteCommand } from "./commands/site.js";
+import { historyCommand } from "./commands/history.js";
+import { setJqExpression } from "./client.js";
 
 const VERSION = "0.3.0";
 
 const HELP_TEXT = `
 bb-browser - AI Agent 浏览器自动化工具
 
+提示：大多数数据获取任务请直接使用 site 命令，无需手动操作浏览器：
+  bb-browser site list                    查看所有可用命令
+  bb-browser site twitter/search "AI"     示例：搜索推文
+  bb-browser site xueqiu/hot-stock 5      示例：获取人气股票
+
 用法：
   bb-browser <command> [options]
 
-网站 CLI 化（把任何网站变成命令行 API）：
-  site list            列出所有可用 adapter（50+）
-  site search <q>      搜索 adapter
-  site <name> [args]   运行 adapter（如 site reddit/thread <url>）
-  site update          更新社区 adapter 库
-  guide                如何创建新 adapter（开发指南）
+开始使用：
+  site recommend               推荐你可能需要的 adapter（基于浏览历史）
+  site list                    列出所有 adapter
+  site info <name>             查看 adapter 用法（参数、返回值、示例）
+  site <name> [args]           运行 adapter
+  site update                  更新社区 adapter 库
+  guide                        如何把任何网站变成 adapter
 
-  示例：
-    bb-browser site twitter/search "claude code"
-    bb-browser site reddit/thread <url>
-    bb-browser site github/pr-create owner/repo --title "feat: ..."
-
-页面导航：
-  open <url> [--tab]   打开指定 URL（默认新 tab，--tab current 当前 tab）
-  back / forward       后退 / 前进
-  refresh              刷新页面
-  close                关闭当前标签页
-  tab                  列出所有标签页
-  tab new [url]        新建标签页
-  tab <n>              切换到第 n 个标签页（按 index）
-  tab select --id <id> 切换到指定 tabId 的标签页
-  tab close [n|--id <id>]  关闭标签页
-  frame <selector>     切换到指定 iframe
-  frame main           返回主 frame
-  wait <ms|@ref>       等待时间或元素
-
-页面交互：
-  click <ref>          点击元素（ref 如 @5 或 5）
-  hover <ref>          悬停在元素上
-  fill <ref> <text>    填充输入框（清空后填入）
-  type <ref> <text>    逐字符输入（不清空）
-  check <ref>          勾选复选框
-  uncheck <ref>        取消勾选复选框
-  select <ref> <val>   下拉框选择
-  press <key>          发送键盘按键（如 Enter, Tab, Control+a）
-  scroll <dir> [px]    滚动页面（up/down/left/right，默认 300px）
-  dialog accept [text] 接受对话框
-  dialog dismiss       拒绝/关闭对话框
+浏览器操作：
+  open <url> [--tab]           打开 URL
+  snapshot [-i] [-c] [-d <n>]  获取页面快照
+  click <ref>                  点击元素
+  hover <ref>                  悬停元素
+  fill <ref> <text>            填充输入框（清空后填入）
+  type <ref> <text>            逐字符输入（不清空）
+  check/uncheck <ref>          勾选/取消复选框
+  select <ref> <val>           下拉框选择
+  press <key>                  发送按键
+  scroll <dir> [px]            滚动页面
 
 页面信息：
-  snapshot             获取当前页面快照（默认完整树）
-  get text <ref>       获取元素文本
-  get url              获取当前页面 URL
-  get title            获取页面标题
-  screenshot [path]    截取当前页面
-  eval "<js>"          执行 JavaScript
-  fetch <url>          在浏览器上下文中 fetch（自动同源路由，带登录态）
+  get text|url|title <ref>     获取页面内容
+  screenshot [path]            截图
+  eval "<js>"                  执行 JavaScript
+  fetch <url>                  带登录态的 HTTP 请求
 
-网络与调试：
-  network requests [filter]  查看网络请求
-  network route <url> [--abort|--body <json>]  拦截请求
-  network unroute [url]      移除拦截规则
-  network clear              清空请求记录
-  console [--clear]          查看/清空控制台消息
-  errors [--clear]           查看/清空 JS 错误
-  trace start|stop|status    录制用户操作
+标签页：
+  tab [list|new|close|<n>]     管理标签页
 
-Daemon 管理：
-  daemon / start       前台启动 Daemon
-  stop                 停止 Daemon
-  status               查看 Daemon 状态
-  reload               重载扩展（需要 CDP 模式）
+导航：
+  back / forward / refresh     后退 / 前进 / 刷新
+
+调试：
+  network requests [filter]    查看网络请求
+  console [--clear]            查看/清空控制台
+  errors [--clear]             查看/清空 JS 错误
+  trace start|stop|status      录制用户操作
+  history search|domains       查看浏览历史
 
 选项：
   --json               以 JSON 格式输出
+  --jq <expr>          对 JSON 输出应用 jq 过滤（直接作用于数据，跳过 id/success 信封）
   -i, --interactive    只输出可交互元素（snapshot 命令）
   -c, --compact        移除空结构节点（snapshot 命令）
   -d, --depth <n>      限制树深度（snapshot 命令）
@@ -138,6 +122,8 @@ interface ParsedArgs {
     depth?: number;
     selector?: string;
     tab?: string;
+    days?: number;
+    jq?: string;
   };
 }
 
@@ -167,6 +153,13 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
     if (arg === "--json") {
       result.flags.json = true;
+    } else if (arg === "--jq") {
+      skipNext = true;
+      const nextIdx = args.indexOf(arg) + 1;
+      if (nextIdx < args.length) {
+        result.flags.jq = args[nextIdx];
+        result.flags.json = true;
+      }
     } else if (arg === "--help" || arg === "-h") {
       result.flags.help = true;
     } else if (arg === "--version" || arg === "-v") {
@@ -186,6 +179,12 @@ function parseArgs(argv: string[]): ParsedArgs {
       const nextIdx = args.indexOf(arg) + 1;
       if (nextIdx < args.length) {
         result.flags.selector = args[nextIdx];
+      }
+    } else if (arg === "--days") {
+      skipNext = true;
+      const nextIdx = args.indexOf(arg) + 1;
+      if (nextIdx < args.length) {
+        result.flags.days = parseInt(args[nextIdx], 10);
       }
     } else if (arg === "--id") {
       // --id 及其值由子命令通过 process.argv 自行解析，这里跳过
@@ -210,6 +209,7 @@ function parseArgs(argv: string[]): ParsedArgs {
  */
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv);
+  setJqExpression(parsed.flags.jq);
 
   // 解析全局 --tab 参数
   const tabArgIdx = process.argv.indexOf('--tab');
@@ -565,6 +565,24 @@ async function main(): Promise<void> {
         break;
       }
 
+      case "history": {
+        const subCmd = parsed.args[0] as 'search' | 'domains' | undefined;
+        if (!subCmd || !['search', 'domains'].includes(subCmd)) {
+          console.error("错误：缺少或无效的子命令");
+          console.error("用法：bb-browser history <search|domains> [query] [--days <n>]");
+          console.error("示例：bb-browser history search github");
+          console.error("      bb-browser history domains --days 7");
+          process.exit(1);
+        }
+        const query = parsed.args.slice(1).join(' ');
+        await historyCommand(subCmd, {
+          json: parsed.flags.json,
+          days: parsed.flags.days || 30,
+          query,
+        });
+        break;
+      }
+
       case "fetch": {
         const fetchUrl = parsed.args[0];
         if (!fetchUrl) {
@@ -594,7 +612,12 @@ async function main(): Promise<void> {
       }
 
       case "site": {
-        await siteCommand(parsed.args, { json: parsed.flags.json, tabId: globalTabId });
+        await siteCommand(parsed.args, {
+          json: parsed.flags.json,
+          jq: parsed.flags.jq,
+          days: parsed.flags.days,
+          tabId: globalTabId,
+        });
         break;
       }
 

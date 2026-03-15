@@ -169,6 +169,10 @@ export async function handleCommand(command: CommandEvent): Promise<void> {
         result = await handleTrace(command);
         break;
 
+      case 'history':
+        result = await handleHistory(command);
+        break;
+
       default:
         result = {
           id: command.id,
@@ -2122,6 +2126,97 @@ async function handleTrace(command: CommandEvent): Promise<CommandResult> {
       id: command.id,
       success: false,
       error: `Trace command failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+async function handleHistory(command: CommandEvent): Promise<CommandResult> {
+  const subCommand = (command.historyCommand || 'search') as string;
+  const days = typeof command.ms === 'number' && command.ms > 0 ? command.ms : 30;
+  const startTime = Date.now() - days * 24 * 60 * 60 * 1000;
+
+  console.log('[CommandHandler] History command:', subCommand, 'days:', days);
+
+  try {
+    switch (subCommand) {
+      case 'search': {
+        const items = await chrome.history.search({
+          text: command.text || '',
+          maxResults: command.maxResults || 100,
+          startTime,
+        });
+
+        return {
+          id: command.id,
+          success: true,
+          data: {
+            historyItems: items.map((item) => ({
+              url: item.url || '',
+              title: item.title || '',
+              visitCount: item.visitCount || 0,
+              lastVisitTime: item.lastVisitTime || 0,
+            })),
+          },
+        };
+      }
+
+      case 'domains': {
+        const items = await chrome.history.search({
+          text: '',
+          maxResults: 5000,
+          startTime,
+        });
+
+        const domainMap = new Map<string, { visits: number; titles: Set<string> }>();
+
+        for (const item of items) {
+          if (!item.url) continue;
+
+          let domain: string;
+          try {
+            domain = new URL(item.url).hostname;
+          } catch {
+            continue;
+          }
+
+          const current = domainMap.get(domain) || { visits: 0, titles: new Set<string>() };
+          current.visits += item.visitCount || 0;
+          if (item.title) {
+            current.titles.add(item.title);
+          }
+          domainMap.set(domain, current);
+        }
+
+        const historyDomains = Array.from(domainMap.entries())
+          .map(([domain, value]) => ({
+            domain,
+            visits: value.visits,
+            titles: Array.from(value.titles),
+          }))
+          .sort((a, b) => b.visits - a.visits);
+
+        return {
+          id: command.id,
+          success: true,
+          data: {
+            historyDomains,
+          },
+        };
+      }
+
+      default:
+        return {
+          id: command.id,
+          success: false,
+          error: `Unknown history subcommand: ${subCommand}`,
+        };
+    }
+  } catch (error) {
+    console.error('[CommandHandler] History command failed:', error);
+    return {
+      id: command.id,
+      success: false,
+      error: `History command failed: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }

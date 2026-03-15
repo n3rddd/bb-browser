@@ -10,6 +10,7 @@
 import { generateId, type Request, type Response } from "@bb-browser/shared";
 import { sendCommand } from "../client.js";
 import { ensureDaemonRunning } from "../daemon-manager.js";
+import { getSiteHintForDomain } from "./site.js";
 
 export interface OpenOptions {
   json?: boolean;
@@ -71,6 +72,11 @@ export async function openCommand(
       }
       if (response.data?.tabId) {
         console.log(`Tab ID: ${response.data.tabId}`);
+      }
+      // 提示：如果该域名有 site adapter，引导使用
+      const siteHint = getSiteHintForDomain(normalizedUrl);
+      if (siteHint) {
+        console.log(`\n💡 ${siteHint}`);
       }
     } else {
       console.error(`错误: ${response.error}`);

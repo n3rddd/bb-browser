@@ -4,6 +4,28 @@
 
 import type { Request, Response } from "@bb-browser/shared";
 import { DAEMON_BASE_URL, COMMAND_TIMEOUT } from "@bb-browser/shared";
+import { applyJq } from "./jq.js";
+
+let jqExpression: string | undefined;
+
+export function setJqExpression(expression?: string): void {
+  jqExpression = expression;
+}
+
+function printJqResults(response: Response): never {
+  const target = response.data ?? response;
+  const results = applyJq(target, jqExpression || ".");
+  for (const result of results) {
+    console.log(typeof result === "string" ? result : JSON.stringify(result));
+  }
+  process.exit(0);
+}
+
+export function handleJqResponse(response: Response): void {
+  if (jqExpression) {
+    printJqResults(response);
+  }
+}
 
 /**
  * 发送命令到 Daemon 并等待响应
@@ -54,7 +76,9 @@ export async function sendCommand(request: Request): Promise<Response> {
       };
     }
 
-    return (await res.json()) as Response;
+    const response = (await res.json()) as Response;
+
+    return response;
   } catch (error) {
     clearTimeout(timeoutId);
 

@@ -33,7 +33,8 @@ export type ActionType =
   | "network"
   | "console"
   | "errors"
-  | "trace";
+  | "trace"
+  | "history";
 
 /** 请求类型 */
 export interface Request {
@@ -90,6 +91,8 @@ export interface Request {
   errorsCommand?: "get" | "clear";
   /** trace 子命令：start, stop, status */
   traceCommand?: "start" | "stop" | "status";
+  /** history 子命令：search, domains */
+  historyCommand?: "search" | "domains";
   /** 按键名（press 命令使用） */
   key?: string;
   /** 修饰键列表（press 命令使用） */
@@ -280,6 +283,19 @@ export interface ResponseData {
   traceEvents?: TraceEvent[];
   /** Trace 录制状态（trace status 命令返回） */
   traceStatus?: TraceStatus;
+  /** History 搜索结果 */
+  historyItems?: Array<{
+    url: string;
+    title: string;
+    visitCount: number;
+    lastVisitTime: number;
+  }>;
+  /** History 域名聚合结果 */
+  historyDomains?: Array<{
+    domain: string;
+    visits: number;
+    titles: string[];
+  }>;
 }
 
 /** 响应类型 */
