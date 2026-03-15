@@ -29,7 +29,7 @@ bb-browser site youtube/transcript VIDEO_ID      # full transcript
 bb-browser site stackoverflow/search "async"     # search SO questions
 ```
 
-**97 commands across 35 platforms.** All using your real browser's login state. [Full list →](https://github.com/epiral/bb-sites)
+**103 commands across 36 platforms.** All using your real browser's login state. [Full list →](https://github.com/epiral/bb-sites)
 
 ## The idea
 
@@ -60,9 +60,9 @@ npm install -g bb-browser
 ### Use
 
 ```bash
-bb-browser site update    # pull 97 community adapters
-bb-browser site list      # see what's available
-bb-browser site zhihu/hot # go
+bb-browser site update        # pull community adapters
+bb-browser site recommend     # see which adapters match your browsing habits
+bb-browser site zhihu/hot     # go
 ```
 
 ### MCP (Claude Code / Cursor)
@@ -78,7 +78,7 @@ bb-browser site zhihu/hot # go
 }
 ```
 
-## 35 platforms, 97 commands
+## 36 platforms, 103 commands
 
 Community-driven via [bb-sites](https://github.com/epiral/bb-sites). One JS file per command.
 
@@ -90,7 +90,7 @@ Community-driven via [bb-sites](https://github.com/epiral/bb-sites). One JS file
 | **Dev** | GitHub, StackOverflow, HackerNews, CSDN, cnblogs, V2EX, Dev.to, npm, PyPI, arXiv | search, issues, repo, top, thread, package |
 | **Video** | YouTube, Bilibili | search, video, transcript, popular, comments, feed |
 | **Entertainment** | Douban, IMDb, Genius, Qidian | movie, search, top250 |
-| **Finance** | Eastmoney, Yahoo Finance | stock quote, news |
+| **Finance** | Xueqiu, Eastmoney, Yahoo Finance | stock, hot stocks, feed, watchlist, search |
 | **Jobs** | BOSS Zhipin, LinkedIn | search, detail, profile |
 | **Knowledge** | Wikipedia, Zhihu, Open Library | search, summary, hot, question |
 | **Shopping** | SMZDM | search deals |
@@ -147,7 +147,15 @@ bb-browser network requests --with-body --json  # capture traffic
 bb-browser screenshot                 # take screenshot
 ```
 
-All commands support `--json` output and `--tab <id>` for concurrent multi-tab operations.
+All commands support `--json` output, `--jq <expr>` for inline filtering, and `--tab <id>` for concurrent multi-tab operations.
+
+```bash
+bb-browser site xueqiu/hot-stock 5 --jq '.items[] | {name, changePercent}'
+# {"name":"云天化","changePercent":"2.08%"}
+# {"name":"东芯股份","changePercent":"-7.60%"}
+
+bb-browser site info xueqiu/stock   # view adapter args, example, domain
+```
 
 ## Daemon configuration
 

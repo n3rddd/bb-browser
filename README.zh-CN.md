@@ -29,7 +29,7 @@ bb-browser site youtube/transcript VIDEO_ID      # YouTube 字幕全文
 bb-browser site stackoverflow/search "async"     # 搜 StackOverflow
 ```
 
-**35 个平台，97 个命令，全部用你真实浏览器的登录态。** [完整列表 →](https://github.com/epiral/bb-sites)
+**36 个平台，103 个命令，全部用你真实浏览器的登录态。** [完整列表 →](https://github.com/epiral/bb-sites)
 
 ## 核心理念
 
@@ -60,9 +60,9 @@ npm install -g bb-browser
 ### 使用
 
 ```bash
-bb-browser site update    # 拉取 97 个社区适配器
-bb-browser site list      # 看看有什么
-bb-browser site zhihu/hot # 开搞
+bb-browser site update        # 拉取社区适配器
+bb-browser site recommend     # 看看哪些和你的浏览习惯匹配
+bb-browser site zhihu/hot     # 开搞
 ```
 
 ### MCP 接入（Claude Code / Cursor）
@@ -78,7 +78,7 @@ bb-browser site zhihu/hot # 开搞
 }
 ```
 
-## 35 个平台，97 个命令
+## 36 个平台，103 个命令
 
 社区驱动，通过 [bb-sites](https://github.com/epiral/bb-sites) 维护。每个命令一个 JS 文件。
 
@@ -90,7 +90,7 @@ bb-browser site zhihu/hot # 开搞
 | **技术开发** | GitHub、StackOverflow、HackerNews、CSDN、博客园、V2EX、Dev.to、npm、PyPI、arXiv | search、issues、repo、top、thread、package |
 | **视频平台** | YouTube、B站 | search、video、transcript、popular、comments、feed |
 | **影音娱乐** | 豆瓣、IMDb、Genius、起点中文网 | movie、search、top250 |
-| **财经股票** | 东方财富、Yahoo Finance | stock、news |
+| **财经股票** | 雪球、东方财富、Yahoo Finance | stock、hot-stock、feed、watchlist、search |
 | **求职招聘** | BOSS直聘、LinkedIn | search、detail、profile |
 | **知识百科** | Wikipedia、知乎、Open Library | search、summary、hot、question |
 | **消费购物** | 什么值得买 | search |
@@ -147,7 +147,15 @@ bb-browser network requests --with-body --json  # 抓包
 bb-browser screenshot                 # 截图
 ```
 
-所有命令支持 `--json` 输出和 `--tab <id>` 多标签页并发操作。
+所有命令支持 `--json` 输出、`--jq <expr>` 内联过滤、和 `--tab <id>` 多标签页并发操作。
+
+```bash
+bb-browser site xueqiu/hot-stock 5 --jq '.items[] | {name, changePercent}'
+# {"name":"云天化","changePercent":"2.08%"}
+# {"name":"东芯股份","changePercent":"-7.60%"}
+
+bb-browser site info xueqiu/stock   # 查看 adapter 参数、示例、域名
+```
 
 ## Daemon 配置
 
