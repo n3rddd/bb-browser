@@ -5,6 +5,12 @@
  * 所有 DOM 操作、输入模拟、脚本执行都通过这个服务层进行。
  */
 
+import {
+  buildRuntimeEvaluateParams,
+  getRuntimeEvaluateError,
+  type RuntimeEvaluateResult,
+} from "@bb-browser/shared";
+
 // ============================================================================
 // 类型定义
 // ============================================================================
@@ -12,21 +18,6 @@
 /** CDP 命令结果的基础类型 */
 interface CDPResult {
   [key: string]: unknown;
-}
-
-/** Runtime.evaluate 的结果 */
-interface RuntimeEvaluateResult {
-  result?: {
-    type: string;
-    value?: unknown;
-    objectId?: string;
-    description?: string;
-    subtype?: string;
-  };
-  exceptionDetails?: {
-    exception?: { description?: string };
-    text?: string;
-  };
 }
 
 /** DOM.getDocument 的结果 */
@@ -285,17 +276,14 @@ export async function evaluate(
     awaitPromise?: boolean;
   } = {}
 ): Promise<unknown> {
-  const result = await sendCommand<RuntimeEvaluateResult>(tabId, 'Runtime.evaluate', {
-    expression,
-    returnByValue: options.returnByValue ?? true,
-    awaitPromise: options.awaitPromise ?? true,
-    replMode: true,
-  });
+  const result = await sendCommand<RuntimeEvaluateResult>(
+    tabId,
+    'Runtime.evaluate',
+    buildRuntimeEvaluateParams(expression, options),
+  );
 
   if (result.exceptionDetails) {
-    const errorMsg = result.exceptionDetails.exception?.description
-      || result.exceptionDetails.text
-      || 'Unknown error';
+    const errorMsg = getRuntimeEvaluateError(result) || 'Unknown error';
     throw new Error(`Eval error: ${errorMsg}`);
   }
 

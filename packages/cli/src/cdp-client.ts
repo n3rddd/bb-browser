@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
-import type { Request, Response, ResponseData, TabInfo, SnapshotData, RefInfo, NetworkRequestInfo, ConsoleMessageInfo, JSErrorInfo, TraceEvent, TraceStatus } from "@bb-browser/shared";
-import { COMMAND_TIMEOUT } from "@bb-browser/shared";
+import type { Request, Response, ResponseData, TabInfo, SnapshotData, RefInfo, NetworkRequestInfo, ConsoleMessageInfo, JSErrorInfo, TraceEvent, TraceStatus, RuntimeEvaluateResult } from "@bb-browser/shared";
+import { COMMAND_TIMEOUT, buildRuntimeEvaluateParams, getRuntimeEvaluateError } from "@bb-browser/shared";
 import { discoverCdpPort } from "./cdp-discovery.js";
 
 interface CdpTargetInfo {
@@ -581,21 +581,14 @@ function loadBuildDomTreeScript(): string {
 }
 
 async function evaluate<T>(targetId: string, expression: string, returnByValue = true): Promise<T> {
-  const result = await sessionCommand<{
-    result: { value?: T; objectId?: string };
-    exceptionDetails?: { text?: string; exception?: { description?: string } };
-  }>(targetId, "Runtime.evaluate", {
-    expression,
-    awaitPromise: true,
-    returnByValue,
-    replMode: true,
-  });
-  if (result.exceptionDetails) {
-    throw new Error(
-      result.exceptionDetails.exception?.description
-      || result.exceptionDetails.text
-      || "Runtime.evaluate failed",
-    );
+  const result = await sessionCommand<RuntimeEvaluateResult<T>>(
+    targetId,
+    "Runtime.evaluate",
+    buildRuntimeEvaluateParams(expression, { returnByValue }),
+  );
+  const error = getRuntimeEvaluateError(result);
+  if (error) {
+    throw new Error(error);
   }
   return (result.result.value ?? result.result) as T;
 }
