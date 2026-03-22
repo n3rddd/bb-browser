@@ -162,23 +162,114 @@ async function(args) {
 
 需要访问页面内部状态或调用内部模块。
 
+## 抗变更模式
+
+网站频繁更新前端代码（CSS class、webpack module ID、GraphQL queryId 等）。以下是经过验证的抗变更模式。
+
+### 模式 1：结构化 DOM 提取（替代 CSS class 选择器）
+
+**问题**：网站经常修改 CSS class 名（如 Google 从 `div.g` 改为 `div.MjjYud`），导致 adapter 失效。
+
+**方案**：用语义化 HTML 元素（h3、a、article）定位内容，不依赖任何 class name。
+
 ```javascript
-/* @meta
-{
-  "name": "xiaohongshu/search",
-  "description": "Search Xiaohongshu notes",
-  "domain": "www.xiaohongshu.com",
-  "args": {"query": {"required": true, "description": "Search query"}},
-  "readOnly": true
-}
-*/
-async function(args) {
-  // 通过 Webpack 注入获取内部模块
-  // 或通过 __vue_app__ 访问 Pinia store
-  // 具体实现取决于目标网站的前端架构
-  // ...
+// ❌ 脆弱：依赖 CSS class（Google 已多次更改）
+const items = doc.querySelectorAll('div.g');
+
+// ✅ 稳健：用语义元素定位
+const h3s = doc.querySelectorAll('h3');
+for (const h3 of h3s) {
+  const a = h3.closest('a');
+  if (!a) continue;
+  const link = a.getAttribute('href');
+  if (!link || !link.startsWith('http')) continue;
+  const title = h3.textContent.trim();
+
+  // 向上查找结果容器（找到有多个 h3 兄弟的层级停止）
+  let container = a;
+  while (container.parentElement && container.parentElement.tagName !== 'BODY') {
+    const sibs = [...container.parentElement.children];
+    if (sibs.filter(s => s.querySelector('h3')).length > 1) break;
+    container = container.parentElement;
+  }
+
+  // 在容器内、链接外查找摘要
+  const linkBlock = a.closest('div') || a;
+  let snippet = '';
+  for (const sp of container.querySelectorAll('span')) {
+    if (linkBlock.contains(sp)) continue;
+    const t = sp.textContent.trim();
+    if (t.length > 30 && t !== title) { snippet = t; break; }
+  }
+  results.push({ title, url: link, snippet });
 }
 ```
+
+**适用于**：Google、Bing、DuckDuckGo、HackerNews 等搜索/列表页面。
+
+### 模式 2：Webpack 模块动态发现（替代硬编码 module ID）
+
+**问题**：SPA 网站（如 Twitter/X）的 webpack module ID 在每次部署时都会变化，硬编码 ID 很快失效。
+
+**方案**：通过搜索模块源码中的稳定签名来动态查找模块。
+
+```javascript
+// 第一步：获取 webpack require 函数
+let __webpack_require__;
+const chunkId = '__bb_' + Date.now();
+window.webpackChunk_twitter_responsive_web.push(
+  [[chunkId], {}, (req) => { __webpack_require__ = req; }]
+);
+
+// 第二步：按源码签名查找模块（不依赖 module ID）
+// 示例：查找 Transaction ID 生成器
+let genTxId;
+for (const id of Object.keys(__webpack_require__.m)) {
+  const src = __webpack_require__.m[id].toString();
+  // 用模块源码中稳定的字符串特征来匹配
+  if (src.includes('jf.x.com') && src.includes('jJ:')) {
+    genTxId = __webpack_require__(id).jJ;
+    break;
+  }
+}
+if (!genTxId) return {
+  error: 'Cannot find transaction ID generator',
+  hint: 'Twitter webpack structure may have changed.'
+};
+
+// 第三步：按 operationName 查找 GraphQL queryId
+let queryId;
+for (const id of Object.keys(__webpack_require__.m)) {
+  const src = __webpack_require__.m[id].toString();
+  const m = src.match(/queryId:"([^"]+)",operationName:"CreateTweet"/);
+  if (m) { queryId = m[1]; break; }
+}
+if (!queryId) return {
+  error: 'Cannot find CreateTweet queryId',
+  hint: 'Twitter GraphQL schema may have changed.'
+};
+```
+
+**选择签名的原则**：
+- 选择**业务语义**字符串而非技术细节（`jf.x.com` 比变量名稳定）
+- 选择**多个特征**组合匹配（`includes('A') && includes('B')`）
+- 选择**export 名**匹配（`jJ:` 是 minified 的 export key，比函数体稳定）
+- 对于 GraphQL：`operationName` 几乎不变，`queryId` 会变 → 用前者查后者
+
+**适用于**：Twitter/X、小红书、抖音等 SPA 应用。
+
+### 模式 3：Vue/React 内部状态访问
+
+```javascript
+// Vue 3 + Pinia（如小红号）
+const app = document.querySelector('#app').__vue_app__;
+const store = app.config.globalProperties.$pinia._s.get('user');
+
+// React（如 Reddit new）
+const fiber = document.querySelector('#App')._reactRootContainer?._internalRoot?.current;
+```
+
+**注意**：内部状态访问比 API 调用更脆弱，优先使用 API 逆向。
 
 ## Step 4：测试
 
