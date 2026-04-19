@@ -344,8 +344,14 @@ type InputObject = Record<string, unknown>;
 
 function decodeInput(data: Uint8Array | undefined): InputObject {
   if (!data || data.length === 0) return {};
-  const raw = textDecoder.decode(data).trim();
+  let raw = textDecoder.decode(data).trim();
   if (!raw) return {};
+  // Wrap large integers (>=16 digits) as strings before JSON.parse
+  // to prevent precision loss for IDs like Twitter/Snowflake IDs
+  raw = raw.replace(
+    /"(?:[^"\\]|\\.)*"|\d{16,}/g,
+    (m) => m.startsWith('"') ? m : `"${m}"`
+  );
   try { return JSON.parse(raw) as InputObject; }
   catch { throw new Error("Invoke input must be valid JSON"); }
 }
